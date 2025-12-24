@@ -44,7 +44,7 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
           parts: [
             { inline_data: { mimeType: req.file.mimetype, data: imageBase64 } },
             {
-              text: "This is a food image. List all ingredients in bullet points.",
+              text: "This is a food image. List all ingredients in bullet points. if it is not a food image, respond with 'Not a food image.'",
             },
           ],
         },

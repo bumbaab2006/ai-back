@@ -36,7 +36,7 @@ router.post("/", async (req, res) => {
     // ✅ Full backend URL-г frontend-д буцаах
     res.json({
       prompt,
-      imageUrl: `http://localhost:5000/generated_images/${fileName}`,
+      imageUrl: `https://ai-back-h30s.onrender.com/generated_images/${fileName}`,
     });
   } catch (e) {
     console.error("🔥 IMAGE CREATOR ERROR:", e);

@@ -19,7 +19,7 @@ router.post("/", async (req, res) => {
     });
 
     const result = await model.generateContent(
-      `List ingredients for this dish:\n${dish} . use only mongolian language.`
+      `List ingredients for this dish:\n${dish} .`
     );
 
     res.json({ text: result.response.text() });

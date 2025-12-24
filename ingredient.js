@@ -19,7 +19,7 @@ router.post("/", async (req, res) => {
     });
 
     const result = await model.generateContent(
-      `List ingredients for this dish:\n${dish} .`
+      `List ingredients for this dish:\n${dish} . if it is not a food dish, respond with "Not a food dish."`
     );
 
     res.json({ text: result.response.text() });

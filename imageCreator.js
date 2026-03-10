@@ -1,25 +1,26 @@
 import express from "express";
 import dotenv from "dotenv";
-import { InferenceClient } from "@huggingface/inference";
 import fs from "fs";
 
 dotenv.config();
 const router = express.Router();
 
-function getImageClient() {
-  const token = process.env.HF_TOKEN || process.env.HF_token;
+function getGeminiApiKey() {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
 
-  if (!token) {
-    throw new Error("HF_TOKEN is not configured.");
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured.");
   }
 
-  return new InferenceClient(token);
+  return apiKey;
 }
 
-function getImageModel() {
-  return (
-    process.env.HF_IMAGE_MODEL?.trim() || "black-forest-labs/FLUX.1-dev"
-  );
+function getPreferredImageModel() {
+  return process.env.GEMINI_IMAGE_MODEL?.trim() || "gemini-3.1-flash-image-preview";
+}
+
+function getImageModelCandidates() {
+  return [...new Set([getPreferredImageModel(), "gemini-2.5-flash-image"])];
 }
 
 function resolvePublicBaseUrl(req) {
@@ -36,23 +37,98 @@ function resolvePublicBaseUrl(req) {
   return `${protocol}://${host}`;
 }
 
+function buildPrompt(description) {
+  return `Create a realistic food photo with clean studio lighting and no people. ${description}`;
+}
+
+function readGeminiParts(payload) {
+  return payload?.candidates?.[0]?.content?.parts || [];
+}
+
+function extractImagePart(parts) {
+  return parts.find((part) => part?.inlineData?.data || part?.inline_data?.data);
+}
+
+function extractText(parts) {
+  return parts
+    .map((part) => part?.text?.trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+async function requestGeminiImage(prompt) {
+  const apiKey = getGeminiApiKey();
+  let lastError = new Error("Gemini did not return an image.");
+
+  for (const model of getImageModelCandidates()) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ["Image"],
+            imageConfig: {
+              aspectRatio: "4:3",
+            },
+          },
+        }),
+      }
+    );
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const providerMessage =
+        payload?.error?.message ||
+        `Gemini image generation failed on model ${model}.`;
+
+      lastError = new Error(providerMessage);
+      lastError.status = response.status;
+      continue;
+    }
+
+    const parts = readGeminiParts(payload);
+    const imagePart = extractImagePart(parts);
+
+    if (imagePart) {
+      return {
+        model,
+        imageBase64: imagePart.inlineData?.data || imagePart.inline_data?.data,
+        text: extractText(parts),
+      };
+    }
+
+    const providerText = extractText(parts);
+    lastError = new Error(
+      providerText || `Gemini returned no image output for model ${model}.`
+    );
+  }
+
+  throw lastError;
+}
+
 router.post("/", async (req, res) => {
   try {
     const description = req.body?.description?.trim();
-    if (!description)
+    if (!description) {
       return res.status(400).json({ error: "Description is required" });
+    }
 
-    const client = getImageClient();
-    const model = getImageModel();
-    const prompt = `A realistic food photo, studio lighting, no people. ${description}`;
-    const imageBlob = await client.textToImage({
-      model,
-      inputs: prompt,
-      parameters: { num_inference_steps: 15, guidance_scale: 7.5 },
-    });
-
-    const arrayBuffer = await imageBlob.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const prompt = buildPrompt(description);
+    const { model, imageBase64 } = await requestGeminiImage(prompt);
+    const buffer = Buffer.from(imageBase64, "base64");
 
     const fileName = `generated_${Date.now()}.png`;
     const folder = "./generated_images";
@@ -65,18 +141,18 @@ router.post("/", async (req, res) => {
       prompt,
       imageUrl: `${resolvePublicBaseUrl(req)}/generated_images/${fileName}`,
     });
-  } catch (e) {
-    console.error("🔥 IMAGE CREATOR ERROR:", e);
+  } catch (error) {
+    console.error("🔥 IMAGE CREATOR ERROR:", error);
     const status =
-      typeof e?.status === "number"
-        ? e.status
-        : typeof e?.statusCode === "number"
-          ? e.statusCode
-          : 500;
+      typeof error?.status === "number" &&
+      error.status >= 400 &&
+      error.status < 600
+        ? error.status
+        : 500;
 
     res
-      .status(status >= 400 && status < 600 ? status : 500)
-      .json({ error: e.message || "Failed to generate image." });
+      .status(status)
+      .json({ error: error.message || "Failed to generate image." });
   }
 });
 

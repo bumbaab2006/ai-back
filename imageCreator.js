@@ -16,6 +16,12 @@ function getImageClient() {
   return new InferenceClient(token);
 }
 
+function getImageModel() {
+  return (
+    process.env.HF_IMAGE_MODEL?.trim() || "black-forest-labs/FLUX.1-dev"
+  );
+}
+
 function resolvePublicBaseUrl(req) {
   const configuredBaseUrl = process.env.PUBLIC_BASE_URL?.trim();
   if (configuredBaseUrl) {
@@ -37,9 +43,10 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Description is required" });
 
     const client = getImageClient();
+    const model = getImageModel();
     const prompt = `A realistic food photo, studio lighting, no people. ${description}`;
     const imageBlob = await client.textToImage({
-      model: "stabilityai/stable-diffusion-xl-base-1.0",
+      model,
       inputs: prompt,
       parameters: { num_inference_steps: 15, guidance_scale: 7.5 },
     });
@@ -54,13 +61,21 @@ router.post("/", async (req, res) => {
     fs.writeFileSync(`${folder}/${fileName}`, buffer);
 
     res.json({
+      model,
       prompt,
       imageUrl: `${resolvePublicBaseUrl(req)}/generated_images/${fileName}`,
     });
   } catch (e) {
     console.error("🔥 IMAGE CREATOR ERROR:", e);
+    const status =
+      typeof e?.status === "number"
+        ? e.status
+        : typeof e?.statusCode === "number"
+          ? e.statusCode
+          : 500;
+
     res
-      .status(500)
+      .status(status >= 400 && status < 600 ? status : 500)
       .json({ error: e.message || "Failed to generate image." });
   }
 });

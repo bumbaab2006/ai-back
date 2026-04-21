@@ -121,11 +121,11 @@ app.use((error, _req, res, _next) => {
     return res.status(400).json({ error: error.message });
   }
 
-  console.error("🔥 SERVER ERROR:", error);
+  console.error("SERVER ERROR:", error);
   return res
     .status(500)
     .json({ error: error.message || "Something went wrong." });
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Backend running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
